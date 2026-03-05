@@ -11,9 +11,9 @@ CREATE TABLE IF NOT EXISTS users (
 -- Crucial for CDC performance: Index the updated_at column
 CREATE INDEX IF NOT EXISTS idx_users_updated_at ON users(updated_at);
 
--- Create the watermarks table to track consumer progress
+-- Change this table definition:
 CREATE TABLE IF NOT EXISTS watermarks (
-    id SERIAL PRIMARY KEY,
+    id BIGSERIAL PRIMARY KEY, -- Changed from SERIAL to BIGSERIAL
     consumer_id VARCHAR(255) NOT NULL UNIQUE,
     last_exported_at TIMESTAMP WITH TIME ZONE NOT NULL,
     updated_at TIMESTAMP WITH TIME ZONE NOT NULL
