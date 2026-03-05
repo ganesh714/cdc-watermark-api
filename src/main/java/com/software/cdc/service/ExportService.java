@@ -5,6 +5,7 @@ import com.software.cdc.models.Watermark;
 import com.software.cdc.repository.UserRepository;
 import com.software.cdc.repository.WatermarkRepository;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.context.annotation.Lazy;
 import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -17,32 +18,71 @@ import java.nio.file.Paths;
 import java.time.Instant;
 import java.time.ZoneId;
 import java.time.ZonedDateTime;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
+import java.util.UUID;
 
-@Slf4j // Lombok annotation for automatic logging
+@Slf4j
 @Service
 public class ExportService {
 
     private final UserRepository userRepository;
     private final WatermarkRepository watermarkRepository;
+    private final ExportService self; // The AOP Proxy self-reference
 
-    public ExportService(UserRepository userRepository, WatermarkRepository watermarkRepository) {
+    public ExportService(UserRepository userRepository, WatermarkRepository watermarkRepository,
+            @Lazy ExportService self) {
         this.userRepository = userRepository;
         this.watermarkRepository = watermarkRepository;
+        this.self = self;
     }
+
+    // --------------------------------------------------------
+    // NEW SYNC METHODS (Shifted from Controller)
+    // --------------------------------------------------------
+
+    public Map<String, String> getWatermarkInfo(String consumerId) {
+        return watermarkRepository.findByConsumerId(consumerId).map(watermark -> {
+            Map<String, String> response = new HashMap<>();
+            response.put("consumerId", consumerId);
+            response.put("lastExportedAt", watermark.getLastExportedAt().toString());
+            return response;
+        }).orElse(null); // Return null so the controller knows to send a 404
+    }
+
+    public Map<String, String> initiateExport(String consumerId, String exportType) {
+        String jobId = UUID.randomUUID().toString();
+        String filename = String.format("%s_%s_%d.csv", exportType, consumerId, Instant.now().toEpochMilli());
+
+        // Call the async method via the "self" proxy so it actually runs in the
+        // background
+        self.processExportAsync(jobId, consumerId, exportType, filename);
+
+        // Build the metadata response for the user
+        Map<String, String> response = new HashMap<>();
+        response.put("jobId", jobId);
+        response.put("status", "started");
+        response.put("exportType", exportType);
+        response.put("outputFilename", filename);
+
+        return response;
+    }
+
+    // --------------------------------------------------------
+    // ASYNC WORKER & HELPERS
+    // --------------------------------------------------------
 
     @Async
     @Transactional
     public void processExportAsync(String jobId, String consumerId, String exportType, String filename) {
         long startTime = System.currentTimeMillis();
-        // Core Req 10: Log job started
         log.info("Export job started: jobId={}, consumerId={}, exportType={}", jobId, consumerId, exportType);
 
         try {
             List<User> recordsToExport;
             ZonedDateTime currentWatermark = getConsumerWatermark(consumerId);
 
-            // 1. Fetch the right data based on the export type
             switch (exportType) {
                 case "full":
                     recordsToExport = userRepository.findByIsDeletedFalseOrderByUpdatedAtAsc();
@@ -58,23 +98,19 @@ public class ExportService {
                     throw new IllegalArgumentException("Unknown export type: " + exportType);
             }
 
-            // 2. Write data to CSV
             Path outputPath = Paths.get("output", filename);
             writeToCsv(recordsToExport, outputPath, exportType);
 
-            // 3. Update the watermark transactionally (Core Req 9)
             if (!recordsToExport.isEmpty()) {
                 ZonedDateTime maxUpdatedAt = recordsToExport.get(recordsToExport.size() - 1).getUpdatedAt();
                 updateWatermark(consumerId, maxUpdatedAt);
             }
 
             long duration = System.currentTimeMillis() - startTime;
-            // Core Req 10: Log job completed
             log.info("Export job completed: jobId={}, rowsExported={}, duration={}ms", jobId, recordsToExport.size(),
                     duration);
 
         } catch (Exception e) {
-            // Core Req 10: Log job failed
             log.error("Export job failed: jobId={}, error={}", jobId, e.getMessage(), e);
         }
     }
@@ -83,18 +119,15 @@ public class ExportService {
         boolean isDelta = "delta".equals(exportType);
 
         try (BufferedWriter writer = Files.newBufferedWriter(path)) {
-            // Write Header
             if (isDelta) {
                 writer.write("operation,id,name,email,created_at,updated_at,is_deleted\n");
             } else {
                 writer.write("id,name,email,created_at,updated_at,is_deleted\n");
             }
 
-            // Write Rows
             for (User user : users) {
                 StringBuilder row = new StringBuilder();
 
-                // Core Req 7: Determine operation for Delta exports
                 if (isDelta) {
                     String operation = "UPDATE";
                     if (user.isDeleted()) {
@@ -120,8 +153,7 @@ public class ExportService {
     private ZonedDateTime getConsumerWatermark(String consumerId) {
         return watermarkRepository.findByConsumerId(consumerId)
                 .map(Watermark::getLastExportedAt)
-                .orElse(ZonedDateTime.ofInstant(Instant.EPOCH, ZoneId.of("UTC"))); // Default to beginning of time if no
-                                                                                   // watermark
+                .orElse(ZonedDateTime.ofInstant(Instant.EPOCH, ZoneId.of("UTC")));
     }
 
     private void updateWatermark(String consumerId, ZonedDateTime newWatermarkTime) {
@@ -137,7 +169,6 @@ public class ExportService {
         watermarkRepository.save(watermark);
     }
 
-    // Helper to prevent CSV breaking if a user's name has a comma
     private String escapeCsv(String data) {
         if (data.contains(",")) {
             return "\"" + data + "\"";
