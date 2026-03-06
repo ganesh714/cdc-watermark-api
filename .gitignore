@@ -1,8 +1,16 @@
 # Ignore environment variables
 .env
 
+# JVM crash logs and temp files
+hs_err_pid*.log
+replay_pid*.log
+*.log
+*.txt
+!README.md
+
 # Ignore export outputs
-output/
+output/*
+!output/.gitignore
 *.csv
 
 # Ignore standard Java/Spring Boot build folders (for later)
