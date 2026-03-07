@@ -47,3 +47,9 @@ sequenceDiagram
         Worker->>Worker: Log Error (Watermark NOT updated)
     end
 ```
+
+## Observability and Logging (Core Req 10)
+To ensure the system is production-ready, the `ExportService` utilizes SLF4J for structured logging. Every asynchronous job emits trace logs:
+1. `Export job started`: Captures the `jobId`, `consumerId`, and `exportType`.
+2. `Export job completed`: Captures the `jobId`, total `rowsExported`, and the execution `duration` in milliseconds.
+3. `Export job failed`: Captures the error stack trace if a database timeout or file system error occurs.
