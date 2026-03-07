@@ -30,23 +30,18 @@ import static org.mockito.Mockito.*;
 public class ExportServiceTest {
 
     @Mock
-    private UserRepository userRepository;
-
-    @Mock
     private WatermarkRepository watermarkRepository;
 
     @Mock
-    private ExportService selfProxy;
+    private ExportAsyncWorker exportAsyncWorker;
 
-    // Injecting mocks and setting the self proxy manually
     private ExportService exportService;
 
     private String testConsumerId = "test_consumer";
 
     @BeforeEach
-    public void setup() throws IOException {
-        exportService = new ExportService(userRepository, watermarkRepository, selfProxy);
-        Files.createDirectories(Paths.get("output"));
+    public void setup() {
+        exportService = new ExportService(watermarkRepository, exportAsyncWorker);
     }
 
     @AfterEach
@@ -93,72 +88,8 @@ public class ExportServiceTest {
         assertEquals("full", res.get("exportType"));
         assertTrue(res.get("outputFilename").contains("full_test_consumer_"));
 
-        verify(selfProxy, times(1)).processExportAsync(
+        verify(exportAsyncWorker, times(1)).processExportAsync(
                 eq(res.get("jobId")), eq(testConsumerId), eq("full"), eq(res.get("outputFilename")));
     }
 
-    @Test
-    public void testProcessExportAsync_Full() throws Exception {
-        User u1 = new User();
-        u1.setId(1L);
-        u1.setName("User 1");
-        u1.setEmail("u1@example.com");
-        u1.setCreatedAt(ZonedDateTime.now().minusDays(1));
-        u1.setUpdatedAt(ZonedDateTime.now());
-        u1.setDeleted(false);
-
-        when(watermarkRepository.findByConsumerId(testConsumerId)).thenReturn(Optional.empty());
-        when(userRepository.findByIsDeletedFalseOrderByUpdatedAtAsc()).thenReturn(Arrays.asList(u1));
-
-        String jobId = "job1";
-        String filename = "test_full.csv";
-
-        ExportService realService = new ExportService(userRepository, watermarkRepository, null);
-        realService.processExportAsync(jobId, testConsumerId, "full", filename);
-
-        Path out = Paths.get("output", filename);
-        assertTrue(Files.exists(out));
-        List<String> lines = Files.readAllLines(out);
-        assertEquals(2, lines.size()); // header + 1 row
-
-        verify(watermarkRepository, times(1)).save(any(Watermark.class));
-    }
-
-    @Test
-    public void testProcessExportAsync_Delta() throws Exception {
-        User u1 = new User();
-        u1.setId(1L);
-        u1.setName("User 1, Jr."); // Test CSV escaping
-        u1.setEmail("u1@example.com");
-        ZonedDateTime now = ZonedDateTime.now();
-        u1.setCreatedAt(now);
-        u1.setUpdatedAt(now);
-        u1.setDeleted(false);
-
-        User u2 = new User();
-        u2.setId(2L);
-        u2.setName("User 2");
-        u2.setEmail("u2@example.com");
-        u2.setCreatedAt(now.minusDays(1));
-        u2.setUpdatedAt(now);
-        u2.setDeleted(true);
-
-        when(watermarkRepository.findByConsumerId(testConsumerId)).thenReturn(Optional.empty());
-        when(userRepository.findByUpdatedAtGreaterThanOrderByUpdatedAtAsc(any())).thenReturn(Arrays.asList(u1, u2));
-
-        String jobId = "job2";
-        String filename = "test_delta.csv";
-
-        ExportService realService = new ExportService(userRepository, watermarkRepository, null);
-        realService.processExportAsync(jobId, testConsumerId, "delta", filename);
-
-        Path out = Paths.get("output", filename);
-        assertTrue(Files.exists(out));
-        List<String> lines = Files.readAllLines(out);
-        assertEquals(3, lines.size()); // header + 2 rows
-        assertTrue(lines.get(1).startsWith("INSERT,"));
-        assertTrue(lines.get(2).startsWith("DELETE,"));
-
-        verify(watermarkRepository, times(1)).save(any(Watermark.class));
-    }
 }
