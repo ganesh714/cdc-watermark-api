@@ -43,3 +43,7 @@ sequenceDiagram
     Thread->>DB: Update watermark for consumer
     Note over Thread: Export Complete
 ```
+
+## Future Scalability Considerations
+While the current architecture uses Spring's `@Async` thread pool for background processing, it is designed to easily scale out. 
+For a truly massive, distributed production system, the `ExportService` could be decoupled. Instead of processing the CSV locally, the `ExportController` would push the `jobId` to a message queue (like **RabbitMQ** or **AWS SQS**). A fleet of separate Worker Microservices would then consume those messages, generate the files, and upload them directly to cloud storage (like AWS S3).
