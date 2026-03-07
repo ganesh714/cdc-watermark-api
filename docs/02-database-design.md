@@ -26,6 +26,10 @@ This table stores the state for each consumer.
 - **`consumer_id` (Unique):** Identifies the client (e.g., "Analytics-Team-A").
 - **`last_exported_at`:** Stores the timestamp of the last record successfully exported for this consumer. This acts as the "bookmark".
 
+## Idempotent Data Seeding
+To simulate a production environment, the database is automatically seeded with 100,000 realistic user records on startup. 
+Crucially, the `01-init.sql` script is **idempotent**. It uses an `IF NOT EXISTS` block to ensure that if the Docker container is restarted, it will not duplicate data or throw errors, maintaining a stable baseline for testing.
+
 ## Persistence and Reliability
 
 The watermark is **only** updated after the CSV file has been successfully written to the `output/` directory. This ensures that if the process crashes mid-export, the watermark remains at the old value, and the next run will re-attempt the export from the same point, guaranteeing zero data loss.
